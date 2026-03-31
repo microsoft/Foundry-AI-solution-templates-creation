@@ -121,6 +121,36 @@ EXPOSE 8080
 ENTRYPOINT ["dotnet", "<ProjectName>.dll"]
 ```
 
+## Dockerfile — Foundry Agent (MAF)
+
+Use this lightweight Dockerfile for any Foundry agent container (U11=Yes or Multi-Agent). Foundry agents are simple Python processes that don't serve HTTP in production (MAF handles hosting), so no multi-stage build is needed. In local Docker Compose mode, the agent serves HTTP on its assigned port for direct container-to-container routing.
+
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# Create non-root user
+RUN adduser --disabled-password --gecos "" --uid 1001 appuser
+USER appuser
+
+# Port used in local Docker Compose mode (direct HTTP)
+# In production, MAF sidecar handles hosting — this port is informational
+EXPOSE 8000
+CMD ["python", "main.py"]
+```
+
+**Key differences from the standard Python Dockerfile:**
+- No multi-stage build (agent images are small, no build step needed)
+- No health check (Foundry manages agent lifecycle in production; in local mode, the agent framework serves `/health`)
+- No uvicorn (MAF wraps the agent with its own HTTP server via `from_agent_framework()`)
+- `CMD ["python", "main.py"]` runs the MAF entry point directly
+
 ---
 
 ## docker-compose.yml — Template
@@ -137,7 +167,7 @@ services:
       - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
       - AZURE_OPENAI_DEPLOYMENT_NAME=${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-4o}
       - APPLICATION_INSIGHTS_CONNECTION_STRING=${APPLICATION_INSIGHTS_CONNECTION_STRING:-}
-      # NOTE: Do NOT set AZURE_AI_PROJECT_ENDPOINT here for multi-agent projects
+      # NOTE: Do NOT set AZURE_AI_PROJECT_ENDPOINT here
       # Its absence triggers direct container-to-container routing (local mode)
     depends_on:
       # List all dependent services
@@ -159,11 +189,61 @@ services:
     depends_on:
       - backend
 
+  # --- Foundry Agent Services (U11=Yes) ---
+  # Add one service per agent defined in agents/ directory.
+  # In local Docker Compose mode, agents serve HTTP directly.
+  # The backend dispatcher detects AZURE_AI_PROJECT_ENDPOINT is absent
+  # and routes to these containers by hostname.
+
+  # <agent-name>:                # One block per agent
+  #   build: ./agents/<agent-name>
+  #   ports:
+  #     - "8001:8000"            # Sequential external port, internal always 8000
+  #   environment:
+  #     - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
+  #     - AZURE_OPENAI_DEPLOYMENT_NAME=${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-4o}
+  #     # Do NOT set AZURE_AI_PROJECT_ENDPOINT (enables local mode)
+  #   healthcheck:
+  #     test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 3
+
   # Add project-type-specific services below
   # For multi-agent: one service per agent on sequential ports
   # For RAG: optional vector store service for local dev
   # For event-driven: message broker service
 ```
+
+## docker-compose.yml — Foundry Agent Example (Single Agent)
+
+For project types with a single Foundry agent (RAG, API Backend, Full-Stack, Data Pipeline, Event-Driven with U11=Yes):
+
+```yaml
+version: "3.8"
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
+      - AZURE_OPENAI_DEPLOYMENT_NAME=${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-4o}
+      # No AZURE_AI_PROJECT_ENDPOINT — enables local mode
+    depends_on:
+      - <agent-name>
+
+  <agent-name>:
+    build: ./agents/<agent-name>
+    ports:
+      - "8001:8000"
+    environment:
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
+      - AZURE_OPENAI_DEPLOYMENT_NAME=${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-4o}
+```
+
+**Critical**: The backend's two-mode dispatcher checks for `AZURE_AI_PROJECT_ENDPOINT`. When absent (local Docker Compose), it routes to `http://<agent-name>:8000` using Docker DNS. When present (production), it routes to the Foundry endpoint. See `references/foundry-agent-patterns.md` for the dispatcher pattern.
 
 ## docker-compose.override.yml — Local Development
 
@@ -250,16 +330,19 @@ server {
 |---------|-------------|-------|
 | Backend API | 8000 | Always the primary API port |
 | Frontend | 3000 | Next.js dev server or Nginx |
+| Foundry Agent (single) | 8001 | Single-agent projects (RAG, API Backend, etc. with U11=Yes) |
 | Agent 1 | 8001 | Multi-agent projects |
 | Agent 2 | 8002 | Multi-agent projects |
 | Agent 3 | 8003 | Multi-agent projects |
 | Agent N | 800N | Sequential ports per agent |
 
+**Port mapping note**: All agent containers listen on port `8000` internally. The external port mapping (`8001`, `8002`, etc.) is for host-machine access during development. Container-to-container routing within Docker Compose uses the internal port (`http://<agent-name>:8000`).
+
 ---
 
 ## Docker Best Practices
 
-1. **Multi-stage builds**: Always use multi-stage to minimize image size
+1. **Multi-stage builds**: Always use multi-stage to minimize image size (exception: Foundry agent containers use single-stage — see Dockerfile pattern above)
 2. **Non-root user**: Create and switch to a non-root user in every Dockerfile
 3. **Health checks**: Include HEALTHCHECK in every Dockerfile
 4. **No secrets in images**: Never COPY .env files or embed secrets

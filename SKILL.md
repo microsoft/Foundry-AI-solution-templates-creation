@@ -52,6 +52,7 @@ If the user's request does not fit these categories exactly, choose the closest 
 | U8 | **Frontend required?** | Yes/No. If yes: Next.js (default), React SPA, or other. |
 | U9 | **What compliance or regulatory requirements?** | e.g., HIPAA, SOC2, GDPR. Drives TRANSPARENCY_FAQ.md and security docs. |
 | U10 | **Target deployment platform?** | Azure Container Apps (default), Azure Functions, AKS, App Service. |
+| U11 | **Use Azure AI Foundry Agent Service?** | **Yes** (default for AI-capable types): AI processing via Foundry Hosted Agents with structured output, managed deployment, and MAF. **No**: hand-rolled code using Azure OpenAI SDK directly. **When to ask**: Type 1 (RAG) — always ask. Types 3, 4, 5, 6, 8 — ask only after the type-specific "Include AI?" question is answered Yes. **Skip for**: Type 2 (Multi-Agent, always Foundry) and Type 7 (ML Training, uses Azure ML). |
 
 #### 1C — Type-Specific Requirements
 
@@ -74,6 +75,10 @@ The selected reference file contains:
 - Source file templates and generation instructions
 - Required Bicep modules list
 - Type-specific quality checklist
+
+#### 1C-bis — Load Foundry Agent Patterns (Conditional)
+
+If U11 = Yes (or if the project type is Multi-Agent), also read `references/foundry-agent-patterns.md`. This file provides the shared Foundry agent scaffolding patterns (agent.yaml, MAF main.py, schemas.py, skills, two-mode dispatcher, registration script) used by the type-specific reference file's "Foundry Mode" section. **Exception**: Multi-Agent projects use their own complete patterns in `references/multi-agent.md` — do not load `foundry-agent-patterns.md` for Multi-Agent.
 
 #### 1D — Document the Requirements
 
@@ -151,6 +156,8 @@ Examples of what each type generates:
 - **Event-Driven**: message handlers, event schemas, saga orchestrators, dead-letter processors
 
 Generate ALL source files with complete, functional code — not placeholders or stubs.
+
+**When U11 = Yes (Foundry mode):** The Foundry agent patterns from `references/foundry-agent-patterns.md` produce additional files: an `agents/` directory with agent.yaml, main.py, schemas.py, skills/, plus a dispatcher (`hosted_agents.py`) and registration script (`register_agents.py`). The type-specific reference file specifies exactly which parts of the existing code the Foundry agent **replaces** vs which parts it **augments**.
 
 ---
 
@@ -301,3 +308,18 @@ Run through this checklist before delivering. Every item must pass.
 #### Type-Specific Checks
 
 Run the quality checklist defined in the loaded type-specific reference file from Step 1C.
+
+#### Foundry Agent Checks (if U11 = Yes)
+
+Run these in addition to Universal and Type-Specific checks:
+
+- [ ] `agent.yaml` has meaningful `description:` (2-3 sentences, not a placeholder)
+- [ ] `main.py` uses `default_options={"response_format": Schema}` for structured output
+- [ ] `schemas.py` has `confidence_score`, `confidence_level`, `summary`, and `errors` fields
+- [ ] `skill.md` defines role, input contract, step-by-step instructions, and output requirements
+- [ ] `register_agents.py` passes `description=agent_def["description"]` to `create_version()`
+- [ ] `hosted_agents.py` correctly switches between Foundry mode and direct HTTP mode
+- [ ] `docker-compose.yml` does NOT set `AZURE_AI_PROJECT_ENDPOINT` on the backend (enables local mode)
+- [ ] `ai-foundry.bicep` module is included in `infra/main.bicep`
+- [ ] RBAC includes both `Cognitive Services OpenAI User` and `Azure AI User` roles
+- [ ] Postprovision hook calls `register_agents.py`

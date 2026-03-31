@@ -141,12 +141,22 @@ SERVICES=("backend")
 # Add more services based on project type:
 # For multi-agent: add each agent name
 # For full-stack: add "frontend"
+# For Foundry-enabled (U11=Yes): add each agent directory name from agents/
+
+# If U11=Yes, discover and add agent services from agents/ directory
+if [[ -d "./agents" ]]; then
+    for AGENT_DIR in ./agents/*/; do
+        AGENT_NAME=$(basename "$AGENT_DIR")
+        SERVICES+=("agents/${AGENT_NAME}")
+    done
+fi
 
 for SERVICE in "${SERVICES[@]}"; do
-    echo "Building image: $SERVICE"
+    IMAGE_NAME=$(basename "$SERVICE")
+    echo "Building image: $IMAGE_NAME"
     az acr build \
         --registry "$ACR_NAME" \
-        --image "${SERVICE}:${IMAGE_TAG}" \
+        --image "${IMAGE_NAME}:${IMAGE_TAG}" \
         --platform linux/amd64 \
         "./${SERVICE}"
 done
@@ -154,16 +164,31 @@ done
 # Verify all images exist
 echo "Verifying images in ACR..."
 for SERVICE in "${SERVICES[@]}"; do
-    az acr repository show-tags --name "$ACR_NAME" --repository "$SERVICE" --query "[?contains(@, '$IMAGE_TAG')]" -o tsv
+    IMAGE_NAME=$(basename "$SERVICE")
+    az acr repository show-tags --name "$ACR_NAME" --repository "$IMAGE_NAME" --query "[?contains(@, '$IMAGE_TAG')]" -o tsv
     if [[ $? -ne 0 ]]; then
-        echo "ERROR: Image ${SERVICE}:${IMAGE_TAG} not found in ACR"
+        echo "ERROR: Image ${IMAGE_NAME}:${IMAGE_TAG} not found in ACR"
         exit 1
     fi
 done
 
-# Run post-deploy scripts (e.g., agent registration, database migrations)
+# Run post-deploy scripts
 # Customize based on project type
-# python scripts/register_agents.py  # (for multi-agent projects)
+
+# Register Foundry agents (U11=Yes or Multi-Agent projects)
+# Only run if register_agents.py exists (indicates Foundry agent project)
+if [[ -f "scripts/register_agents.py" ]]; then
+    echo "Registering Foundry agents..."
+    AZURE_AI_PROJECT_ENDPOINT=$(azd env get-value AZURE_AI_PROJECT_ENDPOINT 2>/dev/null || echo "")
+    if [[ -n "$AZURE_AI_PROJECT_ENDPOINT" ]]; then
+        python scripts/register_agents.py
+    else
+        echo "WARNING: AZURE_AI_PROJECT_ENDPOINT not set, skipping agent registration"
+    fi
+fi
+
+# Database migrations (API Backend, Full-Stack)
+# python scripts/migrate.py
 
 echo "=== Post-provision complete ==="
 ```
@@ -192,12 +217,21 @@ az acr login --name $ACR_NAME
 # Build and push images
 $services = @("backend")
 # Add more services based on project type
+# For Foundry-enabled (U11=Yes): add each agent directory name from agents/
+
+# If U11=Yes, discover and add agent services from agents/ directory
+if (Test-Path "./agents") {
+    Get-ChildItem -Path "./agents" -Directory | ForEach-Object {
+        $services += "agents/$($_.Name)"
+    }
+}
 
 foreach ($service in $services) {
-    Write-Host "Building image: $service"
+    $imageName = Split-Path $service -Leaf
+    Write-Host "Building image: $imageName"
     az acr build `
         --registry $ACR_NAME `
-        --image "${service}:${IMAGE_TAG}" `
+        --image "${imageName}:${IMAGE_TAG}" `
         --platform linux/amd64 `
         "./$service"
 }
@@ -205,11 +239,29 @@ foreach ($service in $services) {
 # Verify all images exist
 Write-Host "Verifying images in ACR..."
 foreach ($service in $services) {
-    $tags = az acr repository show-tags --name $ACR_NAME --repository $service --query "[?contains(@, '$IMAGE_TAG')]" -o tsv
+    $imageName = Split-Path $service -Leaf
+    $tags = az acr repository show-tags --name $ACR_NAME --repository $imageName --query "[?contains(@, '$IMAGE_TAG')]" -o tsv
     if (-not $tags) {
-        throw "Image ${service}:${IMAGE_TAG} not found in ACR"
+        throw "Image ${imageName}:${IMAGE_TAG} not found in ACR"
     }
 }
+
+# Run post-deploy scripts
+
+# Register Foundry agents (U11=Yes or Multi-Agent projects)
+# Only run if register_agents.py exists (indicates Foundry agent project)
+if (Test-Path "scripts/register_agents.py") {
+    Write-Host "Registering Foundry agents..."
+    $projectEndpoint = azd env get-value AZURE_AI_PROJECT_ENDPOINT 2>$null
+    if ($projectEndpoint) {
+        python scripts/register_agents.py
+    } else {
+        Write-Warning "AZURE_AI_PROJECT_ENDPOINT not set, skipping agent registration"
+    }
+}
+
+# Database migrations (API Backend, Full-Stack)
+# python scripts/migrate.py
 
 Write-Host "=== Post-provision complete ==="
 ```
@@ -220,11 +272,17 @@ Write-Host "=== Post-provision complete ==="
 
 | Project Type | preprovision additions | postprovision additions |
 |---|---|---|
-| RAG Chatbot | Validate AI model region, validate search service region | Build API container, run index creation |
+| RAG Chatbot (U11=No) | Validate AI model region, validate search service region | Build API container, run index creation |
+| RAG Chatbot (U11=Yes) | Validate AI model region, validate search service region, validate Foundry compatibility | Build API + agent containers, run index creation, run `register_agents.py` |
 | Multi-Agent | Validate AI model region, validate Foundry compatibility | Build agent containers + backend, run `register_agents.py` |
 | API Backend | Validate database region | Build API container, run database migrations |
+| API Backend (A9=Yes, U11=Yes) | Validate database region, validate AI model region, validate Foundry compatibility | Build API + agent containers, run database migrations, run `register_agents.py` |
 | Data Pipeline | Validate data service availability | Deploy pipeline definitions |
+| Data Pipeline (D9=Yes, U11=Yes) | Validate data service availability, validate AI model region, validate Foundry compatibility | Deploy pipeline definitions, build agent container, run `register_agents.py` |
 | Azure Functions | Validate Functions runtime availability | Deploy function app |
+| Azure Functions (F7=Yes, U11=Yes) | Validate Functions runtime availability, validate AI model region, validate Foundry compatibility | Deploy function app, build agent container, run `register_agents.py` |
 | Full-Stack Web App | Validate all service regions | Build frontend + backend containers |
+| Full-Stack Web App (W10=Yes, U11=Yes) | Validate all service regions, validate AI model region, validate Foundry compatibility | Build frontend + backend + agent containers, run `register_agents.py` |
 | ML Training | Validate ML compute region, validate GPU availability | Build training container, create ML compute |
 | Event-Driven | Validate Service Bus region | Build service containers, create queues/topics |
+| Event-Driven (E9=Yes, U11=Yes) | Validate Service Bus region, validate AI model region, validate Foundry compatibility | Build service + agent containers, create queues/topics, run `register_agents.py` |

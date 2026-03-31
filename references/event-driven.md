@@ -16,6 +16,8 @@ This reference file defines the scaffold pattern for **message-based distributed
 | E6 | **Dead-letter handling?** | `Auto-forward to DLQ` (default), `Custom DLQ processor`, `Alert and manual review`. |
 | E7 | **KEDA scaling?** | `Yes` (default, scale on queue depth), `No` (fixed replicas). |
 | E8 | **Idempotency strategy?** | `Idempotency key in message` (default), `Deduplication window`, `Database check`. |
+| E9 | **Include AI-powered event processing?** | `No` (default). If `Yes`: a microservice that consumes events, calls Foundry for AI processing, and publishes enriched events. Triggers U11 question. |
+| E10 | **What AI processing on events?** | Only ask if E9=Yes. Options: `Classification` (route events by AI-determined category), `Enrichment` (add AI-derived fields), `Anomaly detection` (flag unusual events), `Summarization` (compress event payloads). |
 
 ---
 
@@ -278,6 +280,148 @@ scale: {
 
 ---
 
+## AI Event Processor (E9 = Yes, U11 = Yes)
+
+When the system includes AI-powered event processing via Foundry Agent Service, add a dedicated AI processor microservice. Read `references/foundry-agent-patterns.md` for the shared patterns.
+
+### Additional Folder Structure
+
+```
+<project-slug>/
+├── agents/
+│   └── processor-agent/
+│       ├── agent.yaml
+│       ├── Dockerfile
+│       ├── main.py
+│       ├── requirements.txt
+│       ├── schemas.py
+│       └── skills/
+│           └── processor-skill/
+│               └── skill.md
+├── services/
+│   └── ai-processor/                   # NEW microservice
+│       ├── Dockerfile
+│       ├── requirements.txt
+│       ├── app/
+│       │   ├── __init__.py
+│       │   ├── main.py                 # Consume → AI enrich → publish
+│       │   ├── config.py
+│       │   ├── agents/
+│       │   │   ├── __init__.py
+│       │   │   └── hosted_agents.py    # Two-mode dispatcher
+│       │   ├── handlers/
+│       │   │   ├── __init__.py
+│       │   │   └── process_event.py    # Calls Foundry agent
+│       │   └── publishers/
+│       │       ├── __init__.py
+│       │       └── enriched_event.py
+│       └── tests/
+│           └── test_handlers.py
+├── scripts/
+│   └── register_agents.py
+```
+
+### AI Event Handler
+
+```python
+# services/ai-processor/app/handlers/process_event.py
+"""Process an event through the AI agent and publish enriched result."""
+from ..agents.hosted_agents import dispatch
+from shared.messaging.servicebus import ServiceBusPublisher
+from shared.events.base import CloudEvent
+
+publisher = ServiceBusPublisher("enriched-events")
+
+
+async def handle_event(event: dict):
+    """AI-process an event and publish the enriched version."""
+    cloud_event = CloudEvent(**event)
+
+    # Call Foundry agent for AI processing
+    result = await dispatch("processor-agent", {"event_data": cloud_event.data})
+
+    # Publish enriched event
+    enriched_event = CloudEvent(
+        source=cloud_event.source,
+        type=f"{cloud_event.type}.enriched",
+        data={**cloud_event.data, "ai_enrichment": result},
+    )
+    await publisher.publish(enriched_event.model_dump())
+```
+
+### Processor Agent Schema
+
+```python
+# agents/processor-agent/schemas.py
+from pydantic import BaseModel, Field
+from typing import Literal
+
+
+class ProcessorResult(BaseModel):
+    """Structured output for the event processor agent."""
+
+    classification: str | None = Field(None, description="AI-determined category (if E10=Classification)")
+    enrichments: dict = Field(default_factory=dict, description="AI-derived fields to add to event")
+    is_anomaly: bool = Field(False, description="Whether event is anomalous (if E10=Anomaly detection)")
+    summary: str = Field(description="Summary of AI processing result")
+    confidence_score: float = Field(ge=0.0, le=1.0, description="Processing confidence 0-1")
+    confidence_level: Literal["HIGH", "MEDIUM", "LOW"]
+    errors: list[str] = Field(default_factory=list, description="Processing errors if any")
+```
+
+### Event Catalog Addition
+
+Add enriched event types to `shared/events/catalog.py`:
+
+```python
+# Add to EventTypes:
+    <EVENT>_ENRICHED = "com.<project>.<event>.enriched"
+```
+
+### AI Mode — Hand-Rolled (E9 = Yes, U11 = No)
+
+If the user declines Foundry, use direct Azure OpenAI SDK in the event handler:
+
+```python
+# services/ai-processor/app/handlers/process_event.py (hand-rolled)
+import os
+from openai import AzureOpenAI
+from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from shared.messaging.servicebus import ServiceBusPublisher
+import json
+
+publisher = ServiceBusPublisher("enriched-events")
+
+
+def get_ai_client() -> AzureOpenAI:
+    token_provider = get_bearer_token_provider(
+        DefaultAzureCredential(),
+        "https://cognitiveservices.azure.com/.default",
+    )
+    return AzureOpenAI(
+        azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+        azure_ad_token_provider=token_provider,
+        api_version="2024-10-21",
+    )
+
+
+async def handle_event(event: dict):
+    client = get_ai_client()
+    response = client.chat.completions.create(
+        model=os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
+        messages=[
+            {"role": "system", "content": "Process this event data. Return JSON with enrichments."},
+            {"role": "user", "content": json.dumps(event.get("data", {}))},
+        ],
+        response_format={"type": "json_object"},
+    )
+    enrichment = json.loads(response.choices[0].message.content)
+    enriched_event = {**event, "data": {**event.get("data", {}), "ai_enrichment": enrichment}}
+    await publisher.publish(enriched_event)
+```
+
+---
+
 ## Bicep Modules Required
 
 - `monitoring.bicep` (always)
@@ -289,6 +433,14 @@ scale: {
 
 If E1 includes Event Grid:
 - Event Grid topic/subscription resources in Bicep
+
+**If E9 = Yes and U11 = Yes (Foundry AI mode):**
+- `ai-foundry.bicep` — Foundry account + project + model deployment
+- Additional `container-app.bicep` instance for the processor agent
+- RBAC: `Cognitive Services OpenAI User` + `Azure AI User` on Foundry account
+
+**If E9 = Yes and U11 = No (Hand-rolled AI mode):**
+- `ai-foundry.bicep` — Azure OpenAI model deployment only
 
 ---
 
@@ -305,3 +457,10 @@ If E1 includes Event Grid:
 - [ ] Consumer processes handle poison messages without crashing
 - [ ] Integration tests verify end-to-end message flow across services
 - [ ] All Service Bus clients use `DefaultAzureCredential` (no connection strings)
+
+**If E9 = Yes and U11 = Yes (Foundry AI mode) — also verify:**
+- [ ] AI processor service consumes from correct queue/subscription
+- [ ] AI processor publishes enriched events with `*.enriched` type suffix
+- [ ] Enriched event maintains original CloudEvents envelope structure
+- [ ] Processor agent skill matches E10 answer
+- [ ] Run Foundry quality checklist from `references/foundry-agent-patterns.md`

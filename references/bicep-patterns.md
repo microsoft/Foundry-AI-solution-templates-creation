@@ -74,10 +74,10 @@ Strictly enforce this order. Modules lower in the list may depend on outputs fro
 
 ```
 monitoring
-    → ai-foundry (if RAG / Multi-Agent / any AI project)
+    → ai-foundry (if U11=Yes OR Multi-Agent: any project with Foundry agent integration)
     → container-registry (if containerized)
         → container-apps-env
-            → container-app (×N, one per service)
+            → container-app (×N, one per service + one per Foundry agent if U11=Yes)
                 → role-assignments
 ```
 
@@ -323,6 +323,43 @@ output projectEndpoint string = 'https://${foundryAccount.properties.customSubDo
 output accountId string = foundryAccount.id
 output accountName string = foundryAccount.name
 ```
+
+### Multiple Model Deployments (RAG + Foundry)
+
+For projects that need both a chat/reasoning model AND an embedding model (e.g., RAG with Foundry), add a second deployment resource:
+
+```bicep
+// Embedding model deployment (in addition to chat model above)
+param embeddingDeploymentName string = 'text-embedding-3-large'
+param embeddingModelName string = 'text-embedding-3-large'
+param embeddingModelVersion string = '1'
+param embeddingCapacity int = 120
+
+resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
+  parent: foundryAccount
+  name: embeddingDeploymentName
+  sku: {
+    name: 'GlobalStandard'
+    capacity: embeddingCapacity
+  }
+  properties: {
+    model: {
+      format: 'OpenAI'
+      name: embeddingModelName
+      version: embeddingModelVersion
+    }
+  }
+  dependsOn: [modelDeployment]  // Deployments must be sequential
+}
+```
+
+### RBAC Note for Foundry Agent Projects (U11 = Yes)
+
+When U11 = Yes, all container app managed identities (backend + any Foundry agent containers) must have **both** roles on the Foundry account scope:
+- `Cognitive Services OpenAI User` (`5e0bd9bd-7b93-4f28-af87-19fc36ad61bd`)
+- `Azure AI User` (`53ca9b11-8b9d-4b51-acae-26b3df39f6f0`)
+
+Pass both role GUIDs to `role-assignments.bicep` and include principal IDs from all container apps that need Foundry access.
 
 ### `infra/modules/ai-search.bicep` (for RAG projects)
 

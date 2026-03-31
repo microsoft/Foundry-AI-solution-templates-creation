@@ -8,14 +8,14 @@ Use this catalog to help the user identify which project type best matches their
 
 **What it is**: A conversational AI application that retrieves relevant information from a knowledge base (documents, databases, APIs) and uses an LLM to generate grounded responses.
 
-**Key components**: Document ingestion pipeline, vector store, embedding model, retrieval chain, LLM for generation, chat API, optional frontend.
+**Key components**: Document ingestion pipeline, vector store, embedding model, Foundry RAG agent (default) or hand-rolled retrieval chain, chat API, optional frontend.
 
 **Choose this when**:
 - The user needs a chatbot that answers questions using their own data
 - The user mentions "search over documents", "knowledge base", "Q&A system", or "grounded responses"
 - The user mentions vector stores, embeddings, or RAG explicitly
 
-**Azure services involved**: Azure AI Search or Cosmos DB vCore (vector store), Azure OpenAI (embeddings + LLM), Azure Container Apps, Azure Blob Storage (document storage).
+**Azure services involved**: Azure AI Search or Cosmos DB vCore (vector store), Azure AI Foundry Agent Service (default for AI processing), Azure OpenAI (embeddings + LLM), Azure Container Apps, Azure Blob Storage (document storage).
 
 **Reference file**: `references/rag-chatbot.md`
 
@@ -40,7 +40,7 @@ Use this catalog to help the user identify which project type best matches their
 
 ## 3. API Backend
 
-**What it is**: A REST or GraphQL API service with database backing, authentication, and Azure deployment. Suitable for microservices, backend-for-frontend, or standalone API products.
+**What it is**: A REST or GraphQL API service with database backing, authentication, and Azure deployment. Optionally includes AI inference endpoints powered by Azure AI Foundry Agent Service. Suitable for microservices, backend-for-frontend, or standalone API products.
 
 **Key components**: FastAPI/Flask/Express routers, Pydantic/Zod schemas, database models, middleware (auth, CORS, rate limiting), health checks.
 
@@ -57,7 +57,7 @@ Use this catalog to help the user identify which project type best matches their
 
 ## 4. Data Pipeline
 
-**What it is**: A batch or streaming data processing pipeline for ETL/ELT workloads. Transforms data from sources to sinks with scheduling, monitoring, and error handling.
+**What it is**: A batch or streaming data processing pipeline for ETL/ELT workloads. Optionally includes AI-powered data enrichment via Azure AI Foundry Agent Service. Transforms data from sources to sinks with scheduling, monitoring, and error handling.
 
 **Key components**: Pipeline definitions, transformers, source/sink connectors, scheduling configuration, data quality checks.
 
@@ -74,7 +74,7 @@ Use this catalog to help the user identify which project type best matches their
 
 ## 5. Azure Functions
 
-**What it is**: A serverless event-driven application using Azure Functions. Responds to triggers (HTTP, timer, queue, blob, Event Grid) without managing infrastructure.
+**What it is**: A serverless event-driven application using Azure Functions. Responds to triggers (HTTP, timer, queue, blob, Event Grid) without managing infrastructure. Optionally includes AI inference functions powered by Azure AI Foundry Agent Service.
 
 **Key components**: Function triggers, input/output bindings, Durable Functions (for orchestration), shared utilities, local development settings.
 
@@ -91,7 +91,7 @@ Use this catalog to help the user identify which project type best matches their
 
 ## 6. Full-Stack Web App
 
-**What it is**: A complete web application with frontend UI and backend API. Includes authentication, database, and deployment as a cohesive unit.
+**What it is**: A complete web application with frontend UI and backend API. Optionally includes AI features (chat, summarization, content generation) powered by Azure AI Foundry Agent Service. Includes authentication, database, and deployment as a cohesive unit.
 
 **Key components**: Frontend (Next.js, React, or other), backend API, shared types/schemas, database models, authentication flow, static assets.
 
@@ -125,7 +125,7 @@ Use this catalog to help the user identify which project type best matches their
 
 ## 8. Event-Driven Microservices
 
-**What it is**: A distributed system of decoupled services communicating through messages/events. Each service owns its data and responds to events asynchronously.
+**What it is**: A distributed system of decoupled services communicating through messages/events. Optionally includes AI-powered event processing via Azure AI Foundry Agent Service. Each service owns its data and responds to events asynchronously.
 
 **Key components**: Message handlers, event publishers, event schemas, saga orchestrators, dead-letter processors, per-service databases.
 
@@ -151,5 +151,6 @@ Some projects combine multiple types. Common combinations:
 | Full-Stack Web App | API Backend | Standard web app with well-defined API layer |
 | Event-Driven | Data Pipeline | Event-triggered data processing |
 | API Backend | Azure Functions | API with some serverless background processing |
+| Any AI-capable type | Foundry Agent | AI capabilities powered by hosted Foundry agent (default when AI features selected via U11) |
 
 When combining types: use the primary type's folder structure as the base, then incorporate specific patterns from the secondary type's reference file.

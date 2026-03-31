@@ -20,6 +20,7 @@ Ask these in addition to the universal questions (U1–U10):
 | R8 | **Streaming responses?** | `yes` (default — SSE for real-time chat UX), `no` (batch/synchronous). |
 | R9 | **Reranking?** | `none` (default), `Azure AI Search semantic ranker`, `cross-encoder reranker` (local model). |
 | R10 | **Number of retrieval results (top-k)?** | Default: 5. Higher values give more context but increase latency and cost. |
+| R11 | **Use Azure AI Foundry Agent Service for chat/retrieval?** | **Yes** (default): Foundry RAG agent handles retrieval grounding and response generation via MAF. Ingestion pipeline (load → chunk → embed → index) still generated. **No**: hand-rolled retrieval chain with direct Azure OpenAI SDK calls. Maps to U11. |
 
 ---
 
@@ -93,11 +94,69 @@ Ask these in addition to the universal questions (U1–U10):
     └── conftest.py                 # Shared fixtures (mock vector store, mock LLM)
 ```
 
+### Folder Structure Changes — Foundry Mode (R11 = Yes)
+
+When R11 = Yes, the following changes apply to the folder structure above:
+
+- **REMOVE**: `src/chat/` directory entirely (chain.py, prompts.py, memory.py) — replaced by Foundry agent
+- **ADD**: `agents/rag-agent/` directory (Foundry hosted agent)
+- **ADD**: `src/api/agents/` directory (two-mode dispatcher)
+- **ADD**: `scripts/register_agents.py` (Foundry agent registration)
+
+```
+<project-slug>/
+├── agents/
+│   └── rag-agent/
+│       ├── agent.yaml                  # Foundry Hosted Agent descriptor
+│       ├── Dockerfile
+│       ├── main.py                     # MAF entry point (from_agent_framework)
+│       ├── requirements.txt
+│       ├── schemas.py                  # RAGResponse Pydantic model
+│       └── skills/
+│           └── rag-skill/
+│               └── skill.md            # RAG domain rules and citation instructions
+│
+├── src/
+│   ├── ingestion/                      # UNCHANGED — still needed to populate vector store
+│   │   ├── __init__.py
+│   │   ├── chunker.py
+│   │   ├── embedder.py
+│   │   ├── loader.py
+│   │   └── pipeline.py
+│   │
+│   ├── retrieval/                      # UNCHANGED — vector store client still needed
+│   │   ├── __init__.py
+│   │   ├── vector_store.py
+│   │   ├── reranker.py
+│   │   └── retriever.py
+│   │
+│   └── api/
+│       ├── __init__.py
+│       ├── main.py                     # FastAPI app factory (no chat chain import)
+│       ├── config.py
+│       ├── observability.py
+│       ├── agents/
+│       │   ├── __init__.py
+│       │   └── hosted_agents.py        # Two-mode dispatcher (local vs Foundry)
+│       └── routers/
+│           ├── __init__.py
+│           ├── chat.py                 # MODIFIED: calls dispatcher instead of chain
+│           ├── ingest.py
+│           └── health.py
+│
+├── scripts/
+│   └── register_agents.py             # Foundry agent registration
+│
+└── (frontend, data, tests — same as base structure)
+```
+
 ---
 
 ## Source File Generation Instructions
 
-### Ingestion Pipeline
+The **Ingestion** and **Retrieval** sections below are generated for BOTH modes (Foundry and hand-rolled). The **Chat** section differs based on R11.
+
+### Ingestion Pipeline (Both Modes)
 
 #### `src/ingestion/loader.py`
 
@@ -305,7 +364,7 @@ async def ingest(source_path: Path, strategy: str = "recursive") -> dict:
     }
 ```
 
-### Retrieval
+### Retrieval (Both Modes)
 
 #### `src/retrieval/vector_store.py`
 
@@ -449,6 +508,185 @@ def format_context(results: list[dict]) -> str:
     return "\n\n---\n\n".join(context_parts)
 ```
 
+### Chat — Foundry Mode (R11 = Yes)
+
+When R11 = Yes, the `src/chat/` directory is NOT generated. Instead, generate the Foundry agent files below. Use patterns from `references/foundry-agent-patterns.md` as the base.
+
+#### `agents/rag-agent/agent.yaml`
+
+```yaml
+name: rag-agent
+description: >
+  RAG chatbot agent that retrieves relevant context from an Azure AI Search
+  index and generates grounded, cited responses. Uses structured output
+  to return answer text, source citations, and confidence scoring.
+runtime: agent-framework
+version: "1.0.0"
+resources:
+  cpu: "1"
+  memory: "2Gi"
+env:
+  - name: AZURE_AI_PROJECT_ENDPOINT
+    secretRef: azure-ai-project-endpoint
+  - name: AZURE_OPENAI_DEPLOYMENT_NAME
+    value: <model-from-R4>
+  - name: AZURE_SEARCH_ENDPOINT
+    secretRef: azure-search-endpoint
+  - name: AZURE_SEARCH_INDEX_NAME
+    value: <index-name-from-project>
+  - name: APPLICATION_INSIGHTS_CONNECTION_STRING
+    secretRef: app-insights-connection-string
+```
+
+#### `agents/rag-agent/schemas.py`
+
+```python
+from pydantic import BaseModel, Field
+from typing import Literal
+
+
+class RAGResponse(BaseModel):
+    """Structured output for the RAG agent."""
+
+    answer: str = Field(description="The grounded response to the user's question")
+    sources: list[str] = Field(description="List of source document references cited in the answer")
+    confidence_score: float = Field(ge=0.0, le=1.0, description="Confidence in answer quality 0-1")
+    confidence_level: Literal["HIGH", "MEDIUM", "LOW"]
+    summary: str = Field(description="One-sentence summary of the answer")
+    follow_up_questions: list[str] = Field(
+        default_factory=list, description="Suggested follow-up questions based on context"
+    )
+    errors: list[str] = Field(default_factory=list, description="Processing errors if any")
+```
+
+#### `agents/rag-agent/skills/rag-skill/skill.md`
+
+```markdown
+# RAG Agent — Domain Skill
+
+## Role
+You are a retrieval-augmented generation agent. Your sole responsibility is: answer user questions using ONLY the context retrieved from the knowledge base.
+
+## Input Contract
+You receive:
+- `question` (string): The user's question
+- `context` (string): Retrieved context passages with source metadata
+- `session_id` (string): Conversation session identifier
+
+## Instructions
+1. Read all retrieved context passages carefully
+2. Identify passages relevant to the user's question
+3. Compose a grounded answer using ONLY information from the context
+4. Cite sources using [Source N] notation for every factual claim
+5. If the context is insufficient to fully answer, say so clearly and set confidence_level to LOW
+6. Never fabricate information not present in the context
+7. If multiple sources agree, set confidence_level to HIGH
+8. If sources conflict, note the discrepancy and set confidence_level to MEDIUM
+9. Suggest 1-3 relevant follow-up questions based on the available context
+
+## Output Requirements
+- Always return a JSON object matching the RAGResponse schema exactly
+- Never return free-form prose as your final response
+- confidence_score must reflect actual grounding quality, not optimism
+- sources list must contain all referenced document identifiers
+- If no relevant context found, set confidence_level=LOW and explain in answer
+```
+
+#### `agents/rag-agent/main.py`
+
+Follow the MAF entry point pattern from `references/foundry-agent-patterns.md`:
+
+```python
+"""RAG Agent — Foundry Hosted Agent entry point."""
+import os
+from agent_framework import SkillsProvider
+from agent_framework.azure import AzureOpenAIResponsesClient
+from azure.ai.agentserver.agentframework import from_agent_framework
+from azure.identity import DefaultAzureCredential
+from schemas import RAGResponse
+
+
+def main() -> None:
+    _ai_conn = os.environ.get("APPLICATION_INSIGHTS_CONNECTION_STRING")
+    if _ai_conn:
+        os.environ.setdefault("APPLICATIONINSIGHTS_CONNECTION_STRING", _ai_conn)
+
+    skills = SkillsProvider.from_directory("skills")
+
+    client = AzureOpenAIResponsesClient(
+        endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
+        credential=DefaultAzureCredential(),
+        model=os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
+    )
+
+    from_agent_framework(
+        client=client,
+        skills=skills,
+        default_options={"response_format": RAGResponse},
+    ).run()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+#### `agents/rag-agent/requirements.txt`
+
+```
+agent-framework>=0.1.0
+azure-ai-agentserver>=0.1.0
+azure-identity>=1.17.0
+pydantic>=2.7.0
+opentelemetry-api>=1.24.0
+azure-monitor-opentelemetry-exporter>=1.0.0b26
+```
+
+#### `agents/rag-agent/Dockerfile`
+
+Use the agent Dockerfile pattern from `references/foundry-agent-patterns.md`.
+
+#### `src/api/agents/hosted_agents.py`
+
+Use the two-mode dispatcher pattern from `references/foundry-agent-patterns.md`.
+
+#### `src/api/routers/chat.py` (Foundry Mode)
+
+```python
+"""Chat endpoint — Foundry mode: dispatches to RAG agent instead of calling chain directly."""
+from fastapi import APIRouter
+from pydantic import BaseModel
+from ..agents.hosted_agents import dispatch
+
+router = APIRouter()
+
+
+class ChatRequest(BaseModel):
+    question: str
+    session_id: str = "default"
+    top_k: int = 5
+
+
+@router.post("")
+async def chat(request: ChatRequest):
+    """Send question to the Foundry RAG agent and return structured response."""
+    result = await dispatch("rag-agent", {
+        "question": request.question,
+        "session_id": request.session_id,
+        "top_k": request.top_k,
+    })
+    return result
+```
+
+#### `scripts/register_agents.py`
+
+Use the registration script pattern from `references/foundry-agent-patterns.md`.
+
+---
+
+### Chat — Hand-Rolled Mode (R11 = No)
+
+Generate these files ONLY when R11 = No. These use direct Azure OpenAI SDK calls instead of Foundry Agent Service.
+
 ### Chat
 
 #### `src/chat/prompts.py`
@@ -579,7 +817,9 @@ class ConversationMemory:
         self._sessions[self.session_id] = []
 ```
 
-### API
+### API (Hand-Rolled Mode — R11 = No)
+
+Generate this API structure when R11 = No. When R11 = Yes, use the modified `chat.py` router from the Foundry Mode section above instead.
 
 #### `src/api/main.py`
 
@@ -677,7 +917,7 @@ Beyond the base modules (monitoring, container-registry, container-apps-env, con
 - `cosmos.bicep` — if R2 = Cosmos DB vCore
 - (PostgreSQL module if R2 = pgvector)
 
-**Based on R7 (conversation memory):**
+**Based on R7 (conversation memory) — Hand-Rolled Mode only:**
 - `cosmos.bicep` — if R7 = Cosmos DB
 - (Redis module if R7 = Redis)
 
@@ -691,19 +931,34 @@ Container app managed identities need:
 - `Search Index Data Contributor` on Azure AI Search (if R2 = AI Search)
 - `Storage Blob Data Reader` on Storage account (for document access)
 
+**Additional RBAC when R11 = Yes (Foundry mode):**
+- `Azure AI User` (`53ca9b11-8b9d-4b51-acae-26b3df39f6f0`) on the Foundry account — for both the backend and rag-agent container app managed identities
+
 ---
 
 ## Type-Specific Quality Checklist
 
+**Both Modes:**
 - [ ] Vector store client handles connection failures gracefully
 - [ ] Chunking strategy matches R5 answer
 - [ ] Embedding dimensions match R3 model (3072 for text-embedding-3-large, 1536 for small/ada)
 - [ ] Retrieval chain includes source attribution in responses
-- [ ] Streaming endpoint uses SSE if R8=yes
 - [ ] Ingestion pipeline has idempotency (no duplicate vectors on re-ingestion)
-- [ ] Conversation memory implementation matches R7 answer
-- [ ] Reranking is wired if R9 != none
 - [ ] Top-k value matches R10 answer
-- [ ] System prompt instructs the LLM to cite sources and avoid hallucination
 - [ ] All Azure SDK clients use `DefaultAzureCredential` (no API keys in code)
 - [ ] Tests include mock vector store and mock LLM for unit testing
+
+**Hand-Rolled Mode (R11 = No) — also verify:**
+- [ ] Streaming endpoint uses SSE if R8=yes
+- [ ] Conversation memory implementation matches R7 answer
+- [ ] Reranking is wired if R9 != none
+- [ ] System prompt instructs the LLM to cite sources and avoid hallucination
+
+**Foundry Mode (R11 = Yes) — also verify:**
+- [ ] `agent.yaml` description mentions retrieval, grounding, and citations
+- [ ] `RAGResponse` schema includes `sources`, `confidence_score`, and `confidence_level`
+- [ ] `skill.md` instructs agent to cite sources and avoid hallucination
+- [ ] `hosted_agents.py` dispatcher is wired into chat router
+- [ ] Ingestion pipeline still works independently (not coupled to agent)
+- [ ] `register_agents.py` handles rag-agent registration
+- [ ] `docker-compose.yml` includes rag-agent service without `AZURE_AI_PROJECT_ENDPOINT`
