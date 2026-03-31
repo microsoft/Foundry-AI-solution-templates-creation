@@ -17,6 +17,21 @@ Every scaffolded project needs at least one SVG diagram. Most need two:
 
 Generate the SVG markup directly. The diagrams should be clean, minimal, and informative.
 
+### Recommended Model for SVG Generation
+
+**Gemini 3.1 Pro** produces significantly better SVG architecture diagrams than most other models. It generates cleaner layouts, more accurate spacing, proper arrow routing, and better visual hierarchy.
+
+If the agent has access to Gemini 3.1 Pro (via API, MCP tool, or model switching):
+- **Prefer Gemini 3.1 Pro** for all SVG diagram generation
+- Pass it the prompt templates below along with the project requirements
+- Review the output for correctness (services, arrows, labels) before saving
+
+If Gemini 3.1 Pro is not available:
+- Generate the SVG using the current agent's capabilities
+- Follow the skeleton template and layout guidelines below closely — they compensate for weaker SVG generation by providing precise structure
+- Note in the generated README that diagrams may benefit from manual refinement
+- The user can regenerate diagrams later using a Gemini-capable tool
+
 ### Solution Architecture Diagram Prompt Template
 
 Adapt this template based on the project type and services:
