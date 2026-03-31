@@ -192,6 +192,16 @@ Generate:
 - `docker-compose.override.yml` for local overrides
 - `.dockerignore` per service
 
+#### 4D — Observability Setup
+
+Read `references/observability-patterns.md` for OpenTelemetry + Azure Monitor patterns.
+
+Configure observability in all backend/API entry points:
+- Azure Application Insights integration via OpenTelemetry
+- Structured JSON logging
+- Custom trace attributes for domain-specific telemetry
+- FastAPI/Express lifespan integration
+
 ---
 
 ### Step 5 — Generate Documentation and Architecture
@@ -232,6 +242,17 @@ Generate:
 - `docs/production-migration.md` — gaps between scaffold and production (auth, storage, scaling, security)
 - `docs/troubleshooting.md` — common errors and fixes
 - `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`
+
+#### 5F — Production Security Documentation
+
+Read `references/security-patterns.md` for authentication, RBAC, Key Vault, and network isolation patterns.
+
+Use these patterns to populate `docs/production-migration.md` with specific guidance for:
+- Microsoft Entra ID integration (app registration, token validation)
+- Role-based access control aligned with end users (U2)
+- Azure Key Vault secret management
+- VNet injection and private endpoints
+- Input validation and sanitization
 
 ---
 
