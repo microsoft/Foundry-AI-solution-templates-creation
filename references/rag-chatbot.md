@@ -6,7 +6,7 @@ This reference file defines the scaffold pattern for **Retrieval-Augmented Gener
 
 ## Type-Specific Questions
 
-Ask these in addition to the universal questions (U1–U10):
+Ask these in addition to the universal questions (U1–U11):
 
 | # | Question | Guidance |
 |---|---|---|
@@ -473,6 +473,50 @@ def get_vector_store():
     return AzureAISearchStore()
 ```
 
+#### `src/retrieval/reranker.py`
+
+Generate based on R9 answer. When R9 = none, generate a pass-through. Example for Azure AI Search semantic ranker:
+
+```python
+"""Reranking module — implementation selected by R9 answer."""
+import os
+from azure.search.documents import SearchClient
+from azure.identity import DefaultAzureCredential
+
+
+def rerank(query: str, results: list[dict], top_k: int = 5) -> list[dict]:
+    """Rerank results using the configured reranking strategy (from R9).
+
+    Strategies:
+    - "none": pass-through, return results unchanged
+    - "Azure AI Search semantic ranker": uses Azure AI Search semantic reranking
+    - "cross-encoder reranker": local cross-encoder model (requires sentence-transformers)
+    """
+    # Default: Azure AI Search semantic ranker
+    client = SearchClient(
+        endpoint=os.environ["AZURE_SEARCH_ENDPOINT"],
+        index_name=os.environ.get("AZURE_SEARCH_INDEX_NAME", "rag-index"),
+        credential=DefaultAzureCredential(),
+    )
+    # Semantic ranking uses the query to re-score documents
+    response = client.search(
+        search_text=query,
+        query_type="semantic",
+        semantic_configuration_name="default",
+        top=top_k,
+    )
+    reranked = [
+        {"content": r["content"], "source": r["source"], "score": r["@search.reranker_score"]}
+        for r in response
+    ]
+    return reranked[:top_k]
+
+
+def _rerank_none(query: str, results: list[dict], top_k: int = 5) -> list[dict]:
+    """Pass-through — no reranking. Use when R9 = none."""
+    return results[:top_k]
+```
+
 #### `src/retrieval/retriever.py`
 
 ```python
@@ -613,8 +657,11 @@ def main() -> None:
 
     skills = SkillsProvider.from_directory("skills")
 
+    # Use AZURE_AI_PROJECT_ENDPOINT in production (Foundry mode)
+    # Fall back to AZURE_OPENAI_ENDPOINT for local Docker Compose development
+    endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT") or os.environ["AZURE_OPENAI_ENDPOINT"]
     client = AzureOpenAIResponsesClient(
-        endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
+        endpoint=endpoint,
         credential=DefaultAzureCredential(),
         model=os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
     )
@@ -676,6 +723,55 @@ async def chat(request: ChatRequest):
     })
     return result
 ```
+
+#### `src/api/main.py` (Foundry Mode)
+
+```python
+"""FastAPI application for the RAG chatbot — Foundry mode."""
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from .config import get_settings
+from .observability import setup_observability
+from .routers import chat, ingest, health
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    # Normalize env var for MAF compatibility
+    import os
+    _ai_conn = os.environ.get("APPLICATION_INSIGHTS_CONNECTION_STRING")
+    if _ai_conn:
+        os.environ.setdefault("APPLICATIONINSIGHTS_CONNECTION_STRING", _ai_conn)
+
+    setup_observability(settings.app_insights_connection_string)
+    # Ensure vector store index exists (ingestion still runs on this backend)
+    from ..retrieval.vector_store import ensure_index
+    ensure_index()
+    yield
+
+
+app = FastAPI(title="RAG Chatbot API", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Restrict in production
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# NOTE: No chat chain import — chat router dispatches to Foundry agent
+app.include_router(chat.router, prefix="/chat", tags=["Chat"])
+app.include_router(ingest.router, prefix="/ingest", tags=["Ingestion"])
+app.include_router(health.router, tags=["Health"])
+```
+
+#### Foundry Mode — R7 and R8 Behavior
+
+**R8 (Streaming):** Foundry agents return structured JSON responses, not streaming tokens. When R11=Yes and R8=Yes, the `chat.py` router should wrap the Foundry response in an SSE event for frontend compatibility, but the agent itself does not stream incrementally. If the user requires true token-level streaming, recommend R11=No (hand-rolled mode).
+
+**R7 (Conversation Memory):** In Foundry mode, the `src/chat/memory.py` module is not generated (the entire `src/chat/` directory is removed). Foundry agents are stateless per-request. If R7=Cosmos DB or Redis, implement a lightweight session store in `src/api/services/session_store.py` that injects conversation history into the agent payload, or recommend R11=No for built-in memory management.
 
 #### `scripts/register_agents.py`
 

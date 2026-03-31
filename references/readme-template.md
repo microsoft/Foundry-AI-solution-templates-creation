@@ -66,6 +66,13 @@ Detailed description of the feature, what it does, and how it works.
 | **Local / Docker Compose** | `docker compose up` | All containers run locally — no Azure required |
 ```
 
+For projects with Foundry agents (U11=Yes or Multi-Agent), add a callout explaining local routing:
+
+```markdown
+> [!TIP]
+> In local mode, the backend routes directly to agent containers via Docker networking instead of through Azure AI Foundry. This happens automatically — no configuration changes needed.
+```
+
 ### 8. Quick Deploy
 
 Include:
@@ -123,7 +130,17 @@ Table with all major components:
 <!-- Add project-specific components -->
 ```
 
-For multi-agent projects, include an agent details table:
+For projects with Foundry agents (U11=Yes), add agent rows to the component table:
+
+```markdown
+| Component | Responsibility | Technology | Port |
+|-----------|---------------|------------|------|
+| Backend | API + orchestration | FastAPI | 8000 |
+| <agent-name> | <agent description> | MAF (Foundry Agent) | 8001 |
+| Frontend | User interface | Next.js | 3000 |
+```
+
+For multi-agent projects, also include an agent details table:
 
 ```markdown
 | Agent | Responsibility | MCP Tools | Model | CPU/Memory |

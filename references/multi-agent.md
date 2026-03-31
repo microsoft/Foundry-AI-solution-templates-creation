@@ -6,7 +6,7 @@ This reference file defines the scaffold pattern for **Microsoft Foundry Multi-A
 
 ## Type-Specific Questions
 
-Ask these in addition to the universal questions (U1–U10):
+Ask these in addition to the universal questions (U1–U11):
 
 | # | Question | Guidance |
 |---|---|---|
@@ -155,8 +155,11 @@ def main() -> None:
     # tools = [MCPStreamableHTTPTool(server_url=os.environ["MCP_<TOOL>_URL"], ...)]
 
     # 4. Build Azure OpenAI client using managed identity (no API keys)
+    #    Uses AZURE_AI_PROJECT_ENDPOINT in production (Foundry mode)
+    #    Falls back to AZURE_OPENAI_ENDPOINT for local Docker Compose development
+    endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT") or os.environ["AZURE_OPENAI_ENDPOINT"]
     client = AzureOpenAIResponsesClient(
-        endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
+        endpoint=endpoint,
         credential=DefaultAzureCredential(),
         model=os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", "<model-name>"),
     )

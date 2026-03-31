@@ -38,7 +38,7 @@ npx skills add microsoft/Foundry-AI-solution-templates-creation
 When activated, this skill turns your AI coding agent into a **scaffolding wizard** that:
 
 1. **Asks what you want to build** — presents 8 supported project types (RAG chatbot, multi-agent system, API, etc.)
-2. **Asks dynamic qualifying questions** — universal questions (project name, language, Azure region, auth, etc.) plus type-specific questions (vector store for RAG, orchestration topology for multi-agent, triggers for Functions, etc.)
+2. **Asks dynamic qualifying questions** — universal questions (project name, language, Azure region, auth, Foundry agent preference, etc.) plus type-specific questions (vector store for RAG, orchestration topology for multi-agent, triggers for Functions, etc.)
 3. **Generates a complete project** — every source file, Azure infrastructure, deployment configuration, documentation, CI/CD, and Responsible AI docs
 
 Every scaffolded project is fully deployable with `azd up`. No manual assembly required.
@@ -51,14 +51,16 @@ The skill ships with **8 first-class project types**. Each has a dedicated refer
 
 | # | Type | Reference File | Description |
 |---|------|---------------|-------------|
-| 1 | **RAG Chatbot** | `references/rag-chatbot.md` | Retrieval-Augmented Generation chatbot with vector search (Azure AI Search, Cosmos DB vCore, or pgvector), embedding pipeline, and streaming chat API |
-| 2 | **Multi-Agent System** | `references/multi-agent.md` | Multiple AI agents coordinated by an orchestrator with parallel/sequential/batched topologies. Microsoft Foundry and MAF compatible. |
-| 3 | **API Backend** | `references/api-backend.md` | REST or GraphQL API service with database, authentication middleware, pagination, and rate limiting |
-| 4 | **Data Pipeline** | `references/data-pipeline.md` | ETL/ELT data processing pipeline — batch or streaming — with extractors, transformers, and loaders |
-| 5 | **Azure Functions** | `references/function-app.md` | Serverless event-driven functions with HTTP, Timer, Queue, Blob, and Event Grid triggers. Supports Durable Functions. |
-| 6 | **Full-Stack Web App** | `references/full-stack-app.md` | Frontend (Next.js, React SPA) + Backend (FastAPI, Express) with typed API client and shared models |
+| 1 | **RAG Chatbot** | `references/rag-chatbot.md` | Retrieval-Augmented Generation chatbot with vector search (Azure AI Search, Cosmos DB vCore, or pgvector), embedding pipeline, and streaming chat API. Supports Foundry agent mode. |
+| 2 | **Multi-Agent System** | `references/multi-agent.md` | Multiple AI agents coordinated by an orchestrator with parallel/sequential/batched topologies. Always uses Microsoft Foundry and MAF. |
+| 3 | **API Backend** | `references/api-backend.md` | REST or GraphQL API service with database, authentication middleware, pagination, and rate limiting. Optional Foundry agent for AI inference. |
+| 4 | **Data Pipeline** | `references/data-pipeline.md` | ETL/ELT data processing pipeline — batch or streaming — with extractors, transformers, and loaders. Optional Foundry agent for AI enrichment. |
+| 5 | **Azure Functions** | `references/function-app.md` | Serverless event-driven functions with HTTP, Timer, Queue, Blob, and Event Grid triggers. Supports Durable Functions. Optional Foundry agent as Container App sidecar. |
+| 6 | **Full-Stack Web App** | `references/full-stack-app.md` | Frontend (Next.js, React SPA) + Backend (FastAPI, Express) with typed API client and shared models. Optional Foundry agent for AI features. |
 | 7 | **ML Training & Inference** | `references/ml-training.md` | Azure ML workspace with training scripts, pipeline definitions, model registry, and managed online endpoints |
-| 8 | **Event-Driven Microservices** | `references/event-driven.md` | Message-based distributed system using Azure Service Bus and/or Event Grid with KEDA scaling and dead-letter handling |
+| 8 | **Event-Driven Microservices** | `references/event-driven.md` | Message-based distributed system using Azure Service Bus and/or Event Grid with KEDA scaling and dead-letter handling. Optional Foundry agent for AI processing. |
+
+Types 1–6 and 8 support optional **Azure AI Foundry Agent Service** integration (U11), which adds a Foundry-hosted agent with structured output, a two-mode dispatcher for seamless local/cloud routing, and agent registration scripts. Type 2 (Multi-Agent) always uses Foundry. Type 7 (ML Training) uses Azure ML instead.
 
 ---
 
@@ -119,7 +121,7 @@ After installation, simply ask your AI agent to scaffold a project using natural
 The skill activates automatically when it detects a scaffolding request. It then:
 
 1. Presents the project type selection
-2. Asks qualifying questions (10 universal + 6-10 type-specific)
+2. Asks qualifying questions (11 universal + 6-11 type-specific)
 3. Generates every file in the project
 
 ### Deploying the Generated Project
@@ -149,6 +151,7 @@ Every scaffolded project includes the following. None of these are stubs or plac
 | Category | What's Included |
 |----------|----------------|
 | **Source Code** | Complete application code for all services — API endpoints, business logic, data models, configuration, tests |
+| **Foundry Agents** | When U11=Yes: agent.yaml descriptors, MAF entry points, structured output schemas, domain skills, two-mode dispatcher, registration scripts |
 | **Azure Bicep Infrastructure** | `infra/main.bicep` (subscription-scoped) + modular resource files: AI Foundry, Container Apps, ACR, AI Search, Cosmos DB, Storage, Key Vault, Service Bus, monitoring, RBAC |
 | **Deployment Configuration** | `azure.yaml` with preprovision and postprovision hooks for both Windows (PowerShell) and Linux (bash) |
 | **Docker** | Multi-stage `Dockerfile` per service + `docker-compose.yml` for full local development without Azure + `.dockerignore` |
@@ -169,16 +172,21 @@ Every scaffolded project includes the following. None of these are stubs or plac
 The skill uses a **progressive disclosure** pattern to stay efficient and context-aware:
 
 ```
-SKILL.md (core orchestrator, ~400 lines)
+SKILL.md (core orchestrator, ~330 lines)
     │
     ├── Always loaded first
     │   Contains: 6-step workflow, project type routing table,
-    │   universal questions (U1-U10), quality checklist
+    │   universal questions (U1-U11), quality checklist
     │
     ├── Loads ONE type-specific reference file based on user's choice
     │   e.g., references/rag-chatbot.md
     │   Contains: type-specific questions, folder structure,
     │   source file patterns, Bicep modules list, quality checklist
+    │
+    ├── Conditionally loads Foundry agent patterns (when U11=Yes)
+    │   references/foundry-agent-patterns.md
+    │   Contains: agent.yaml, MAF entry point, schemas, skills,
+    │   two-mode dispatcher, registration script, RBAC requirements
     │
     └── Loads common reference files as needed in Steps 4-5
         references/bicep-patterns.md    → Azure infrastructure
@@ -198,7 +206,7 @@ SKILL.md (core orchestrator, ~400 lines)
 
 | Step | Name | What Happens |
 |------|------|-------------|
-| **1** | **Identify & Gather Requirements** | Present 8 project types. Ask 10 universal questions (U1-U10). Load type-specific reference file and ask its questions (e.g., R1-R10 for RAG). Document all answers in `docs/requirements.md`. |
+| **1** | **Identify & Gather Requirements** | Present 8 project types. Ask 11 universal questions (U1-U11). Load type-specific reference file and ask its questions (e.g., R1-R11 for RAG). If U11=Yes, also load `foundry-agent-patterns.md`. Document all answers in `docs/requirements.md`. |
 | **2** | **Generate Project Structure** | Create the complete folder layout — common root files + type-specific directories from the reference file. |
 | **3** | **Generate Source Files** | Follow the type-specific reference file's generation instructions to produce all application code with complete, functional implementations. |
 | **4** | **Generate Infrastructure & Deployment** | Load `bicep-patterns.md` → generate `main.bicep` + all modules. Load `azure-yaml-patterns.md` → generate `azure.yaml` + hooks. Load `docker-patterns.md` → generate Dockerfiles + compose. |
@@ -209,12 +217,12 @@ SKILL.md (core orchestrator, ~400 lines)
 
 Questions are asked in two phases:
 
-1. **Universal questions (U1-U10)** — asked for ALL project types: business problem, end users, project name, programming language, Azure region, authentication, additional Azure services, frontend needed, compliance requirements, deployment platform.
+1. **Universal questions (U1-U11)** — asked for ALL project types: business problem, end users, project name, programming language, Azure region, authentication, additional Azure services, frontend needed, compliance requirements, deployment platform, and Azure AI Foundry Agent Service preference.
 
 2. **Type-specific questions** — asked only for the selected project type. For example:
-   - **RAG Chatbot** (R1-R10): vector store, embedding model, chunking strategy, LLM, context window, conversation memory, streaming, reranking, top-k
+   - **RAG Chatbot** (R1-R11): vector store, embedding model, chunking strategy, LLM, context window, conversation memory, streaming, reranking, top-k, Foundry mode
    - **Multi-Agent** (T1-T10): agent names/roles, orchestration topology, MCP tools, model, regions, SKU
-   - **API Backend** (A1-A8): endpoints, database, API style, pagination, rate limiting, versioning
+   - **API Backend** (A1-A10): endpoints, database, API style, pagination, rate limiting, versioning, AI inclusion
 
 Users only see questions relevant to their project type.
 
@@ -225,7 +233,7 @@ Users only see questions relevant to their project type.
 If a user requests a project type that is **not one of the 8 supported types** (e.g., "Build me a real-time IoT telemetry dashboard"), the skill still works but with reduced precision:
 
 1. The agent maps the request to the **closest supported type** or **combines patterns** from multiple types (e.g., IoT dashboard = Event-Driven + Full-Stack Web App)
-2. Universal questions (U1-U10) are still asked
+2. Universal questions (U1-U11) are still asked
 3. The agent loads the closest reference file(s) and adapts the type-specific questions
 4. The scaffold is generated using the adapted patterns
 
@@ -276,6 +284,15 @@ If a user requests a project type that is **not one of the 8 supported types** (
 | **LLM output variability** | Different agents (Claude Code, Copilot, Codex) may produce slightly different scaffolds from the same questions, because each LLM interprets instructions differently. |
 | **Hallucination risk** | While the reference files constrain the agent's output, the LLM may still generate code that references non-existent APIs, incorrect SDK methods, or wrong Bicep resource properties. Always review generated code. |
 | **No execution or testing** | The skill instructs the agent to generate files but does not execute or test them. `az bicep build`, `docker compose config`, and test suites should be run manually after scaffolding. |
+
+### Foundry Agent Limitations (U11=Yes)
+
+| Limitation | Details |
+|-----------|---------|
+| **No token-level streaming** | Foundry agents return structured JSON responses. True SSE streaming (token-by-token) requires hand-rolled mode (U11=No). Foundry mode can wrap the response in an SSE event for frontend compatibility, but the response arrives as a single payload. |
+| **Stateless agents** | Foundry agents are stateless per-request — no built-in conversation memory. If persistent memory is needed (R7=Cosmos DB or Redis), a separate session store must be implemented in the backend, or choose hand-rolled mode. |
+| **Registration script placeholder** | The `register_agents.py` script contains placeholder comments for the Foundry SDK registration calls, as the SDK API is still evolving. Actual registration code must be implemented based on the specific Foundry SDK version available at deploy time. |
+| **Local mode requires Azure OpenAI** | In Docker Compose local mode, agents fall back to `AZURE_OPENAI_ENDPOINT` for model calls. This requires an Azure OpenAI resource to be provisioned even for local development. |
 
 ---
 
@@ -419,6 +436,10 @@ To update existing patterns (e.g., newer Azure API versions, updated SDK methods
 │   ├── full-stack-app.md                 # Full-stack: Next.js + FastAPI, shared types
 │   ├── ml-training.md                    # ML: training scripts, AML pipelines, endpoints
 │   ├── event-driven.md                   # Event-driven: Service Bus, CloudEvents, KEDA
+│   │
+│   │  ── Foundry agent patterns (conditional, loaded when U11=Yes) ──
+│   │
+│   ├── foundry-agent-patterns.md         # Shared Foundry agent: agent.yaml, MAF, schemas, dispatcher
 │   │
 │   │  ── Common patterns (shared by all project types) ──
 │   │

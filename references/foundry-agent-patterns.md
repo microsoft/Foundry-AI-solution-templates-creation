@@ -73,8 +73,11 @@ def main() -> None:
     # tools = [MCPStreamableHTTPTool(server_url=os.environ["MCP_TOOL_URL"])]
 
     # 4. Build Azure OpenAI client using managed identity (no API keys)
+    #    Uses AZURE_AI_PROJECT_ENDPOINT in production (Foundry mode)
+    #    Falls back to AZURE_OPENAI_ENDPOINT for local Docker Compose development
+    endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT") or os.environ["AZURE_OPENAI_ENDPOINT"]
     client = AzureOpenAIResponsesClient(
-        endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
+        endpoint=endpoint,
         credential=DefaultAzureCredential(),
         model=os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
     )
@@ -323,6 +326,7 @@ Add agent containers as services in `docker-compose.yml`:
     ports:
       - "8001:8000"           # Sequential ports per agent: 8001, 8002, etc.
     environment:
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
       - AZURE_OPENAI_DEPLOYMENT_NAME=${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-4o}
       - APPLICATION_INSIGHTS_CONNECTION_STRING=${APPLICATION_INSIGHTS_CONNECTION_STRING:-}
       # NOTE: Do NOT set AZURE_AI_PROJECT_ENDPOINT — its absence enables local HTTP mode

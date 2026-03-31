@@ -189,14 +189,20 @@ jobs:
 
 | Project Type | CI Additions | Deploy Additions |
 |---|---|---|
-| RAG Chatbot | Test ingestion pipeline, test retrieval chain | Run index creation after deploy |
-| Multi-Agent | Test each agent schema, test orchestrator logic | Run `register_agents.py` after deploy |
+| RAG Chatbot (U11=No) | Test ingestion pipeline, test retrieval chain | Run index creation after deploy |
+| RAG Chatbot (U11=Yes) | Test ingestion pipeline, test retrieval chain, validate agent schemas | Run index creation, build agent containers, run `register_agents.py` after deploy |
+| Multi-Agent | Test each agent schema, test orchestrator logic | Build agent containers, run `register_agents.py` after deploy |
 | API Backend | Test API endpoints, test database migrations | Run database migrations after deploy |
+| API Backend (A9=Yes, U11=Yes) | Test API endpoints, test database migrations, validate agent schemas | Run database migrations, build agent containers, run `register_agents.py` after deploy |
 | Data Pipeline | Test transformers, validate pipeline definitions | Deploy pipeline definitions |
+| Data Pipeline (D9=Yes, U11=Yes) | Test transformers, validate pipeline definitions, validate agent schemas | Deploy pipeline definitions, build agent container, run `register_agents.py` after deploy |
 | Azure Functions | Test function triggers, validate bindings | Deploy function app via `func azure functionapp publish` |
+| Azure Functions (F7=Yes, U11=Yes) | Test function triggers, validate bindings, validate agent schemas | Deploy function app, build agent container, run `register_agents.py` after deploy |
 | Full-Stack Web App | Test frontend + backend, E2E tests (optional) | Build and deploy both containers |
+| Full-Stack Web App (W10=Yes, U11=Yes) | Test frontend + backend, validate agent schemas, E2E tests (optional) | Build frontend + backend + agent containers, run `register_agents.py` after deploy |
 | ML Training | Test training scripts with small dataset | No auto-deploy (training is manual) |
 | Event-Driven | Test message handlers, test event schemas | Create queues/topics after deploy |
+| Event-Driven (E9=Yes, U11=Yes) | Test message handlers, test event schemas, validate agent schemas | Build service + agent containers, create queues/topics, run `register_agents.py` after deploy |
 
 ---
 

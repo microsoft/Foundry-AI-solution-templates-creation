@@ -82,7 +82,7 @@ If U11 = Yes (or if the project type is Multi-Agent), also read `references/foun
 
 #### 1D — Document the Requirements
 
-Create `docs/requirements.md` with a structured summary of ALL answers organized by section: Universal (U1–U10) and Type-Specific.
+Create `docs/requirements.md` with a structured summary of ALL answers organized by section: Universal (U1–U11) and Type-Specific.
 
 ---
 
@@ -270,7 +270,7 @@ Run through this checklist before delivering. Every item must pass.
 #### Universal Checks (all project types)
 
 **Requirements & Documentation:**
-- [ ] `docs/requirements.md` exists with all U1–U10 + type-specific answers
+- [ ] `docs/requirements.md` exists with all U1–U11 + type-specific answers
 - [ ] `TRANSPARENCY_FAQ.md` covers all 6 required questions
 - [ ] README includes all required sections with no placeholder text
 - [ ] `docs/production-migration.md` documents all production gaps
